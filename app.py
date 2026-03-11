@@ -205,51 +205,62 @@ div[data-testid="stSpinner"] p { color: #7ecf7e !important; }
 /* ── DIVIDER ── */
 hr { border-color: rgba(100,200,100,0.2) !important; }
 
-/* ── RESULT HTML STYLES ── */
+/* ── RESULT BOX WRAPPER ── */
 .result-outer {
     background: #0a1c0b;
     border: 1px solid rgba(74,222,128,0.25);
     border-radius: 16px;
     padding: 2rem 2.25rem;
     margin-top: 1rem;
-    color: #dff5df;
 }
-.result-outer h2 {
-    font-family: 'Playfair Display', serif;
-    color: #7ecf7e;
-    font-size: 1.25rem;
-    margin: 1.5rem 0 0.6rem;
-    border-bottom: 1px solid rgba(100,200,100,0.15);
-    padding-bottom: 0.4rem;
+
+/* Force ALL text inside result box to be bright — targets Streamlit's markdown divs */
+.result-outer *,
+.result-outer p,
+.result-outer li,
+.result-outer span,
+.result-outer div,
+.result-outer ul,
+.result-outer ol,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] ul li,
+[data-testid="stMarkdownContainer"] ol li,
+[data-testid="stMarkdownContainer"] td,
+[data-testid="stMarkdownContainer"] th {
+    color: #dff5df !important;
+    line-height: 1.8 !important;
 }
-.result-outer p {
-    color: #dff5df;
-    line-height: 1.8;
-    margin: 0.4rem 0;
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] h4 {
+    color: #7ecf7e !important;
+    font-family: 'Playfair Display', serif !important;
 }
-.result-outer ul, .result-outer ol {
-    color: #dff5df;
-    padding-left: 1.4rem;
-    margin: 0.4rem 0 0.8rem;
+[data-testid="stMarkdownContainer"] strong,
+[data-testid="stMarkdownContainer"] b {
+    color: #a8e6a8 !important;
+    font-weight: 600 !important;
 }
-.result-outer li {
-    color: #dff5df;
-    line-height: 1.8;
-    margin-bottom: 0.2rem;
+/* Table styling in results */
+[data-testid="stMarkdownContainer"] table {
+    width: 100%;
+    border-collapse: collapse;
 }
-.result-outer strong {
-    color: #a8e6a8;
-    font-weight: 600;
+[data-testid="stMarkdownContainer"] th {
+    background: rgba(74,222,128,0.15) !important;
+    color: #7ecf7e !important;
+    padding: 0.5rem 0.75rem !important;
+    border: 1px solid rgba(100,200,100,0.25) !important;
 }
-.result-outer .total-line {
-    background: rgba(74,222,128,0.1);
-    border: 1px solid rgba(74,222,128,0.3);
-    border-radius: 8px;
-    padding: 0.6rem 1rem;
-    color: #4ade80;
-    font-weight: 700;
-    font-size: 1.05rem;
-    margin-top: 0.75rem;
+[data-testid="stMarkdownContainer"] td {
+    padding: 0.45rem 0.75rem !important;
+    border: 1px solid rgba(100,200,100,0.15) !important;
+    color: #dff5df !important;
+}
+[data-testid="stMarkdownContainer"] tr:nth-child(even) td {
+    background: rgba(255,255,255,0.03) !important;
 }
 
 /* ── INSPIRATION CARDS ── */
@@ -301,139 +312,51 @@ def encode_image(uploaded_file):
     return base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def parse_image_searches(result_text):
-    lines = result_text.strip().split("\n")
-    for line in reversed(lines):
-        if line.startswith("IMAGE_SEARCHES:"):
-            raw = line.replace("IMAGE_SEARCHES:", "").strip()
-            terms = [t.strip() for t in raw.split("|") if t.strip()]
-            return terms[:3]
-    return []
-
-
 def clean_result_text(result_text):
     lines = result_text.strip().split("\n")
     return "\n".join(l for l in lines if not l.startswith("IMAGE_SEARCHES:"))
 
 
-def markdown_to_html(text):
-    """Convert Claude markdown output to styled HTML."""
-    lines = text.split("\n")
-    html_lines = []
-    in_ul = False
-    in_ol = False
-    ol_counter = 0
+def generate_landscape_images(form_data):
+    """Use Claude + Stable Diffusion via fal.ai free tier, or fall back to pollinations.ai (no key needed)."""
+    pool_text = "with a sparkling swimming pool" if form_data["pool"] == "Yes" else ""
+    patio_text = "with a pergola patio cover" if form_data["patio_cover"] == "Yes" else ""
+    lighting_text = "with elegant outdoor string lights" if form_data["lighting"] == "Yes" else ""
 
-    for line in lines:
-        stripped = line.strip()
-
-        # Close lists if needed
-        if in_ul and not stripped.startswith("- ") and not stripped.startswith("* "):
-            html_lines.append("</ul>")
-            in_ul = False
-        if in_ol and not re.match(r"^\d+\.", stripped):
-            html_lines.append("</ol>")
-            in_ol = False
-            ol_counter = 0
-
-        if not stripped:
-            html_lines.append("<br>")
-            continue
-
-        # Headings
-        if stripped.startswith("#### "):
-            content = format_inline(stripped[5:])
-            html_lines.append(f"<h2>{content}</h2>")
-        elif stripped.startswith("### "):
-            content = format_inline(stripped[4:])
-            html_lines.append(f"<h2>{content}</h2>")
-        elif stripped.startswith("## "):
-            content = format_inline(stripped[3:])
-            html_lines.append(f"<h2>{content}</h2>")
-        elif stripped.startswith("# "):
-            content = format_inline(stripped[2:])
-            html_lines.append(f"<h2>{content}</h2>")
-
-        # Numbered list
-        elif re.match(r"^\d+\.", stripped):
-            if not in_ol:
-                html_lines.append("<ol>")
-                in_ol = True
-            content = format_inline(re.sub(r"^\d+\.\s*", "", stripped))
-            html_lines.append(f"<li>{content}</li>")
-
-        # Bullet list
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            if not in_ul:
-                html_lines.append("<ul>")
-                in_ul = True
-            content = format_inline(stripped[2:])
-            # Highlight total line
-            if "TOTAL" in content.upper() or "total estimate" in content.lower():
-                html_lines.append(f'<li class="total-line">{content}</li>')
-            else:
-                html_lines.append(f"<li>{content}</li>")
-
-        # Normal paragraph
-        else:
-            content = format_inline(stripped)
-            html_lines.append(f"<p>{content}</p>")
-
-    if in_ul:
-        html_lines.append("</ul>")
-    if in_ol:
-        html_lines.append("</ol>")
-
-    return "\n".join(html_lines)
-
-
-def format_inline(text):
-    """Handle bold and italic inline markdown."""
-    # Bold
-    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-    # Italic
-    text = re.sub(r"\*(.+?)\*", r"<em>\1</em>", text)
-    return text
-
-
-def get_pexels_images(queries):
-    """Get working landscape images from Pexels using their curated endpoint (no key needed for embed)."""
-    pexels_map = {
-        "modern": "https://images.pexels.com/photos/1643389/pexels-photo-1643389.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "desert": "https://images.pexels.com/photos/158251/forest-the-sun-morning-158251.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "tropical": "https://images.pexels.com/photos/1072824/pexels-photo-1072824.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "mediterranean": "https://images.pexels.com/photos/1029599/pexels-photo-1029599.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "japanese": "https://images.pexels.com/photos/1108701/pexels-photo-1108701.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "coastal": "https://images.pexels.com/photos/1005417/pexels-photo-1005417.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "backyard": "https://images.pexels.com/photos/2988861/pexels-photo-2988861.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "garden": "https://images.pexels.com/photos/1458694/pexels-photo-1458694.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "patio": "https://images.pexels.com/photos/1643384/pexels-photo-1643384.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "pool": "https://images.pexels.com/photos/261327/pexels-photo-261327.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "lawn": "https://images.pexels.com/photos/589840/pexels-photo-589840.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "minimalist": "https://images.pexels.com/photos/2736388/pexels-photo-2736388.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "xeriscape": "https://images.pexels.com/photos/5503376/pexels-photo-5503376.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "cottage": "https://images.pexels.com/photos/931177/pexels-photo-931177.jpeg?auto=compress&cs=tinysrgb&w=700",
-    }
-
-    fallbacks = [
-        "https://images.pexels.com/photos/2988861/pexels-photo-2988861.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "https://images.pexels.com/photos/1643389/pexels-photo-1643389.jpeg?auto=compress&cs=tinysrgb&w=700",
-        "https://images.pexels.com/photos/1072824/pexels-photo-1072824.jpeg?auto=compress&cs=tinysrgb&w=700",
+    # Three different angles/views of the same yard
+    prompts = [
+        (
+            f"Professional landscape photography, wide aerial view of a beautiful {form_data['style']} style "
+            f"Southern California residential backyard, {form_data['ground_cover']} ground cover, "
+            f"{form_data['color_scheme']} color palette, {pool_text} {patio_text}, "
+            f"Bird of Paradise plants, Agave, Mexican Sage, {form_data['plant_maintenance'].split('(')[0].strip()} maintenance plants, "
+            f"sunny California weather, photorealistic, high quality DSLR photo",
+            "Aerial Overview"
+        ),
+        (
+            f"Professional landscape photography, ground-level view standing inside a beautiful {form_data['style']} style "
+            f"Southern California backyard, {form_data['ground_cover']} ground, "
+            f"{form_data['color_scheme']} color scheme, {patio_text} {lighting_text}, "
+            f"lush SoCal plants, hardscape pavers, photorealistic, golden hour lighting, high quality",
+            "Ground Level View"
+        ),
+        (
+            f"Professional landscape photography, close-up detail shot of {form_data['style']} style "
+            f"Southern California garden, {form_data['ground_cover']}, "
+            f"{form_data['color_scheme']} plants and flowers, Bird of Paradise, Agave, decorative rocks, "
+            f"California native plants, photorealistic, magazine quality photo",
+            "Garden Detail"
+        ),
     ]
 
-    result_urls = []
-    for i, q in enumerate(queries[:3]):
-        q_lower = q.lower()
-        matched = False
-        for keyword, url in pexels_map.items():
-            if keyword in q_lower:
-                result_urls.append((url, q))
-                matched = True
-                break
-        if not matched:
-            result_urls.append((fallbacks[i % len(fallbacks)], q))
+    images = []
+    for prompt_text, label in prompts:
+        encoded = prompt_text.replace(" ", "%20").replace(",", "%2C").replace("(", "%28").replace(")", "%29")
+        # pollinations.ai — free, no API key, generates real AI images from text prompts
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width=700&height=460&nologo=true&seed={hash(prompt_text) % 9999}"
+        images.append((url, label))
 
-    return result_urls
+    return images
 
 
 def get_estimate(form_data, image_b64_list):
@@ -498,9 +421,6 @@ Three specific actionable tips.
 Clear action items to get started.
 
 Use SoCal plant names (Bird of Paradise, Agave, Mexican Sage, etc.) and current SoCal contractor rates.
-
-On the very last line, output:
-IMAGE_SEARCHES: {form_data['style']} backyard | {form_data['ground_cover']} landscape | {form_data['style']} garden patio
 """
 
     content.append({"type": "text", "text": prompt})
@@ -620,7 +540,6 @@ if generate:
             image_b64_list = [encode_image(f) for f in (uploaded_files or [])[:4]]
             result = get_estimate(form_data, image_b64_list)
 
-        image_search_terms = parse_image_searches(result)
         display_result = clean_result_text(result)
 
         # ── Summary header ──
@@ -633,42 +552,34 @@ if generate:
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Inspiration images ──
+        # ── AI-Generated Inspiration Images ──
         st.markdown("""
         <div style="font-family:'Playfair Display',serif;font-size:1.25rem;color:#7ecf7e;margin-bottom:0.4rem;">
-            🖼️ Design Inspiration Visuals
+            🖼️ AI-Generated Design Visuals
         </div>
         <div style="color:#a3c9a8;font-size:0.84rem;margin-bottom:1rem;">
-            Visual references matching your style — share these with your contractor.
+            AI-generated previews based on your exact style, ground cover, and feature selections.
         </div>
         """, unsafe_allow_html=True)
 
-        if image_search_terms and len(image_search_terms) >= 3:
-            queries = image_search_terms
-        else:
-            queries = [
-                f"{style} backyard",
-                f"{ground_cover} landscape",
-                f"{style} patio garden"
-            ]
-
-        image_data = get_pexels_images(queries)
+        image_data = generate_landscape_images(form_data)
 
         ic1, ic2, ic3 = st.columns(3)
         for col, (img_url, label) in zip([ic1, ic2, ic3], image_data):
             with col:
                 st.markdown(f"""
                 <div class="inspiration-card">
-                    <img src="{img_url}" alt="{label}" />
-                    <div class="inspiration-label">🔍 {label}</div>
+                    <img src="{img_url}" alt="{label}" style="width:100%;height:180px;object-fit:cover;display:block;" />
+                    <div class="inspiration-label">✦ {label}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Estimate text rendered as HTML ──
-        result_html = markdown_to_html(display_result)
-        st.markdown(f'<div class="result-outer">{result_html}</div>', unsafe_allow_html=True)
+        # ── Estimate text — back to st.markdown for clean table/bullet formatting ──
+        st.markdown('<div class="result-outer">', unsafe_allow_html=True)
+        st.markdown(display_result)
+        st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("""
         <div style="text-align:center;margin-top:2rem;padding:1rem;
