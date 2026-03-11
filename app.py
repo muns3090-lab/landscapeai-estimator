@@ -63,10 +63,65 @@ html, body, [class*="css"] {
     font-size: 1.3rem;
     color: #7ecf7e;
     margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
 }
+
+/* ── ALL question labels: bright white ── */
+label,
+.stSelectbox label,
+.stRadio label,
+.stCheckbox label,
+.stNumberInput label,
+.stTextArea label,
+.stFileUploader label,
+.stSlider label,
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] label {
+    color: #f5fff5 !important;
+    font-weight: 500 !important;
+    font-size: 0.97rem !important;
+}
+
+/* Radio button option text */
+div[data-testid="stRadio"] label span,
+div[data-testid="stRadio"] div[role="radiogroup"] label {
+    color: #f0f7f0 !important;
+}
+
+/* Checkbox label text */
+div[data-testid="stCheckbox"] label span {
+    color: #f0f7f0 !important;
+}
+
+/* Selectbox dropdown text */
+div[data-testid="stSelectbox"] div[data-baseweb="select"] span,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] div {
+    color: #f0f7f0 !important;
+}
+
+/* General input fields */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea {
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(100,200,100,0.2) !important;
+    border-radius: 10px !important;
+    color: #f0f7f0 !important;
+}
+
+/* File uploader text */
+div[data-testid="stFileUploader"] span,
+div[data-testid="stFileUploader"] p {
+    color: #d0ead0 !important;
+}
+
+.stSlider > div > div > div { background: #2d7a35 !important; }
+
+/* Slider current value text */
+div[data-testid="stSlider"] div[data-testid="stTickBarMin"],
+div[data-testid="stSlider"] div[data-testid="stTickBarMax"] {
+    color: #a3c9a8 !important;
+}
+
 .stButton > button {
     background: linear-gradient(135deg, #2d7a35, #4ade80) !important;
     color: #0d1f0f !important;
@@ -83,30 +138,58 @@ html, body, [class*="css"] {
     transform: translateY(-2px) !important;
     box-shadow: 0 8px 30px rgba(74,222,128,0.4) !important;
 }
-.stTextInput > div > div > input,
-.stNumberInput > div > div > input,
-.stTextArea > div > div > textarea,
-.stSelectbox > div > div,
-.stMultiSelect > div > div {
-    background: rgba(255,255,255,0.06) !important;
-    border: 1px solid rgba(100,200,100,0.2) !important;
-    border-radius: 10px !important;
-    color: #e8f0e9 !important;
-}
-.stSlider > div > div > div { background: #2d7a35 !important; }
+
+/* ── Result output: bright readable text ── */
 .result-box {
-    background: linear-gradient(135deg, rgba(34,85,40,0.5), rgba(20,50,25,0.7));
+    background: linear-gradient(135deg, rgba(10,30,12,0.85), rgba(8,22,10,0.92));
     border: 1px solid rgba(74,222,128,0.3);
     border-radius: 16px;
     padding: 2rem;
-    margin-top: 1.5rem;
+    margin-top: 1rem;
 }
-.cost-highlight {
-    font-family: 'Playfair Display', serif;
-    font-size: 2.5rem;
-    color: #4ade80;
+
+/* All markdown text in results */
+div[data-testid="stMarkdownContainer"] p {
+    color: #dff0df !important;
+    line-height: 1.75 !important;
+}
+div[data-testid="stMarkdownContainer"] li {
+    color: #dff0df !important;
+    line-height: 1.75 !important;
+}
+div[data-testid="stMarkdownContainer"] h1,
+div[data-testid="stMarkdownContainer"] h2,
+div[data-testid="stMarkdownContainer"] h3,
+div[data-testid="stMarkdownContainer"] h4 {
+    color: #7ecf7e !important;
+    font-family: 'Playfair Display', serif !important;
+    margin-top: 1.2rem !important;
+}
+div[data-testid="stMarkdownContainer"] strong {
+    color: #a8e6a8 !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stMarkdownContainer"] em {
+    color: #b8d8b8 !important;
+}
+
+/* Divider */
+hr { border-color: rgba(100,200,100,0.15) !important; }
+
+.inspiration-card {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(100,200,100,0.2);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+}
+.inspiration-label {
+    color: #a3c9a8;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.5rem 0.75rem;
     text-align: center;
-    text-shadow: 0 0 20px rgba(74,222,128,0.4);
+    background: rgba(0,0,0,0.2);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -126,6 +209,22 @@ def encode_image(uploaded_file):
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=85)
     return base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def parse_image_searches(result_text):
+    lines = result_text.strip().split("\n")
+    for line in reversed(lines):
+        if line.startswith("IMAGE_SEARCHES:"):
+            raw = line.replace("IMAGE_SEARCHES:", "").strip()
+            terms = [t.strip() for t in raw.split("|") if t.strip()]
+            return terms[:3]
+    return []
+
+
+def clean_result_text(result_text):
+    lines = result_text.strip().split("\n")
+    cleaned = [l for l in lines if not l.startswith("IMAGE_SEARCHES:")]
+    return "\n".join(cleaned)
 
 
 def get_estimate(form_data, image_b64_list):
@@ -176,25 +275,30 @@ Based on Southern California average contractor prices and labor costs (2024-202
 
 4. **PROJECT TIMELINE** - Realistic week-by-week schedule
 
-5. **TOP 3 DESIGN INSPIRATIONS** - Describe 3 specific visual styles with plant names and materials the homeowner can search on Pinterest
+5. **TOP 3 DESIGN INSPIRATIONS** - Name 3 specific visual styles with plant names and materials the homeowner can search on Pinterest
 
 6. **MONEY-SAVING TIPS** - 3 specific tips to stay within budget
 
 7. **RECOMMENDED NEXT STEPS** - What to do to get started
 
 Use dollar signs, bullet points, and headers. Be specific with SoCal plant names (Bird of Paradise, Mexican Sage, Agave, etc.) and SoCal contractor typical rates.
+
+At the very end of your response, on its own line, output exactly this:
+IMAGE_SEARCHES: [3-5 word search term 1] | [3-5 word search term 2] | [3-5 word search term 3]
+Make each term a vivid landscape style phrase that would return beautiful results on Unsplash or Pinterest, matching this project's style and color scheme.
 """
 
     content.append({"type": "text", "text": prompt})
 
     response = client.messages.create(
         model="claude-opus-4-5",
-        max_tokens=2500,
+        max_tokens=2800,
         messages=[{"role": "user", "content": content}]
     )
     return response.content[0].text
 
 
+# ── FORM ──────────────────────────────────────────────────────────────────────
 col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
@@ -271,11 +375,13 @@ with col_right:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ── Generate Button ───────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
 bcol1, bcol2, bcol3 = st.columns([1, 2, 1])
 with bcol2:
     generate = st.button("🌿 Generate My Free Estimate", use_container_width=True)
 
+# ── Results ───────────────────────────────────────────────────────────────────
 if generate:
     api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -303,21 +409,56 @@ if generate:
 
             result = get_estimate(form_data, image_b64_list)
 
-        st.markdown('<div class="result-box">', unsafe_allow_html=True)
+        image_search_terms = parse_image_searches(result)
+        display_result = clean_result_text(result)
+
+        # ── Estimate header ──
         st.markdown(f"""
-        <div style="text-align:center;margin-bottom:1rem;">
-            <div style="font-family:'DM Sans';color:#a3c9a8;font-size:0.9rem;text-transform:uppercase;letter-spacing:2px;">Your Custom Estimate</div>
-            <div style="font-family:'Playfair Display',serif;font-size:1.5rem;color:#7ecf7e;">{sqft:,} sq ft · ${budget:,} Budget · {style}</div>
+        <div style="text-align:center;margin:2rem 0 1.5rem;">
+            <div style="font-family:'DM Sans';color:#a3c9a8;font-size:0.9rem;text-transform:uppercase;letter-spacing:2px;margin-bottom:0.4rem;">Your Custom Estimate</div>
+            <div style="font-family:'Playfair Display',serif;font-size:1.5rem;color:#7ecf7e;">{sqft:,} sq ft &nbsp;·&nbsp; ${budget:,} Budget &nbsp;·&nbsp; {style}</div>
         </div>
         """, unsafe_allow_html=True)
-        st.divider()
-        st.markdown(result)
+
+        # ── Inspiration Images ──
+        st.markdown("""
+        <div style="font-family:'Playfair Display',serif;font-size:1.25rem;color:#7ecf7e;margin-bottom:0.5rem;">🖼️ Design Inspiration Visuals</div>
+        <div style="color:#a3c9a8;font-size:0.85rem;margin-bottom:1rem;">These visuals match your selected style. Share them with your contractor as inspiration.</div>
+        """, unsafe_allow_html=True)
+
+        # Build image queries — fallback if Claude didn't return IMAGE_SEARCHES
+        if image_search_terms and len(image_search_terms) == 3:
+            queries = image_search_terms
+        else:
+            queries = [
+                f"{style} backyard landscaping",
+                f"{ground_cover} landscape southern california",
+                f"{style} garden patio outdoor"
+            ]
+
+        img_col1, img_col2, img_col3 = st.columns(3)
+        for col, query in zip([img_col1, img_col2, img_col3], queries):
+            encoded = query.replace(" ", "%20").replace("/", "%2F")
+            img_url = f"https://source.unsplash.com/featured/700x460/?{encoded}"
+            with col:
+                st.markdown(f"""
+                <div class="inspiration-card">
+                    <img src="{img_url}" style="width:100%;height:175px;object-fit:cover;" />
+                    <div class="inspiration-label">🔍 {query}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Estimate Text ──
+        st.markdown('<div class="result-box">', unsafe_allow_html=True)
+        st.markdown(display_result)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("""
-        <div style="text-align:center;margin-top:2rem;padding:1rem;border:1px dashed rgba(100,200,100,0.2);border-radius:12px;color:#6b9e6b;font-size:0.85rem;">
-            Powered by LandscapeAI · Estimates based on Southern California 2024-2025 average pricing<br>
-            Final quotes may vary · Always get 3 contractor bids before committing
+        <div style="text-align:center;margin-top:2rem;padding:1rem;border:1px dashed rgba(100,200,100,0.2);border-radius:12px;color:#a3c9a8;font-size:0.85rem;">
+            💼 <strong style="color:#7ecf7e;">Powered by LandscapeAI</strong> &nbsp;·&nbsp; Estimates based on Southern California 2024-2025 average pricing<br>
+            Final quotes may vary &nbsp;·&nbsp; Always get 3 contractor bids before committing
         </div>
         """, unsafe_allow_html=True)
 
