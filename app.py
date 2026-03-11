@@ -318,45 +318,63 @@ def clean_result_text(result_text):
 
 
 def generate_landscape_images(form_data):
-    """Use Claude + Stable Diffusion via fal.ai free tier, or fall back to pollinations.ai (no key needed)."""
+    """
+    Fetch AI-generated landscape images from pollinations.ai server-side,
+    return as (PIL.Image, label) tuples so st.image() can render them directly
+    — bypassing Streamlit's HTML sandbox that blocks external image URLs.
+    """
+    import urllib.parse
+    import requests
+
     pool_text = "with a sparkling swimming pool" if form_data["pool"] == "Yes" else ""
     patio_text = "with a pergola patio cover" if form_data["patio_cover"] == "Yes" else ""
     lighting_text = "with elegant outdoor string lights" if form_data["lighting"] == "Yes" else ""
+    maintenance = form_data["plant_maintenance"].split("(")[0].strip()
 
-    # Three different angles/views of the same yard
     prompts = [
         (
-            f"Professional landscape photography, wide aerial view of a beautiful {form_data['style']} style "
-            f"Southern California residential backyard, {form_data['ground_cover']} ground cover, "
-            f"{form_data['color_scheme']} color palette, {pool_text} {patio_text}, "
-            f"Bird of Paradise plants, Agave, Mexican Sage, {form_data['plant_maintenance'].split('(')[0].strip()} maintenance plants, "
-            f"sunny California weather, photorealistic, high quality DSLR photo",
-            "Aerial Overview"
+            f"Professional real estate landscape photography, wide view of a beautiful "
+            f"{form_data['style']} style Southern California residential backyard, "
+            f"{form_data['ground_cover']} ground cover, {form_data['color_scheme']} color palette, "
+            f"{pool_text} {patio_text}, Bird of Paradise plants, Agave, Mexican Sage, "
+            f"{maintenance} maintenance plants, sunny California weather, photorealistic DSLR photo, "
+            f"no people, crisp sharp details",
+            "🏡 Wide Overview"
         ),
         (
-            f"Professional landscape photography, ground-level view standing inside a beautiful {form_data['style']} style "
-            f"Southern California backyard, {form_data['ground_cover']} ground, "
-            f"{form_data['color_scheme']} color scheme, {patio_text} {lighting_text}, "
-            f"lush SoCal plants, hardscape pavers, photorealistic, golden hour lighting, high quality",
-            "Ground Level View"
+            f"Professional landscape photography, eye-level view inside a stunning "
+            f"{form_data['style']} style Southern California backyard, "
+            f"{form_data['ground_cover']} ground, {form_data['color_scheme']} color scheme, "
+            f"{patio_text} {lighting_text}, lush SoCal plants, decorative hardscape pavers, "
+            f"photorealistic, golden hour lighting, no people, magazine quality",
+            "🌅 Eye-Level View"
         ),
         (
-            f"Professional landscape photography, close-up detail shot of {form_data['style']} style "
-            f"Southern California garden, {form_data['ground_cover']}, "
-            f"{form_data['color_scheme']} plants and flowers, Bird of Paradise, Agave, decorative rocks, "
-            f"California native plants, photorealistic, magazine quality photo",
-            "Garden Detail"
+            f"Professional landscape photography, detailed garden close-up of "
+            f"{form_data['style']} style Southern California yard, {form_data['ground_cover']}, "
+            f"{form_data['color_scheme']} plants and flowers, Bird of Paradise, Agave, "
+            f"decorative rocks, California native plants, photorealistic, sharp focus, "
+            f"beautiful composition, no people",
+            "🌿 Garden Detail"
         ),
     ]
 
-    images = []
-    for prompt_text, label in prompts:
-        encoded = prompt_text.replace(" ", "%20").replace(",", "%2C").replace("(", "%28").replace(")", "%29")
-        # pollinations.ai — free, no API key, generates real AI images from text prompts
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=700&height=460&nologo=true&seed={hash(prompt_text) % 9999}"
-        images.append((url, label))
+    results = []
+    for i, (prompt_text, label) in enumerate(prompts):
+        try:
+            encoded_prompt = urllib.parse.quote(prompt_text)
+            seed = abs(hash(prompt_text + str(i))) % 99999
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=700&height=460&nologo=true&seed={seed}&model=flux"
+            response = requests.get(url, timeout=45)
+            if response.status_code == 200 and response.headers.get("content-type", "").startswith("image"):
+                img = Image.open(io.BytesIO(response.content)).convert("RGB")
+                results.append((img, label))
+            else:
+                results.append((None, label))
+        except Exception:
+            results.append((None, label))
 
-    return images
+    return results
 
 
 def get_estimate(form_data, image_b64_list):
@@ -558,21 +576,26 @@ if generate:
             🖼️ AI-Generated Design Visuals
         </div>
         <div style="color:#a3c9a8;font-size:0.84rem;margin-bottom:1rem;">
-            AI-generated previews based on your exact style, ground cover, and feature selections.
+            AI-generated previews built from your exact inputs — style, ground cover, features, and color scheme.
         </div>
         """, unsafe_allow_html=True)
 
-        image_data = generate_landscape_images(form_data)
+        with st.spinner("🎨 Generating personalized yard visuals..."):
+            image_data = generate_landscape_images(form_data)
 
         ic1, ic2, ic3 = st.columns(3)
-        for col, (img_url, label) in zip([ic1, ic2, ic3], image_data):
+        for col, (img, label) in zip([ic1, ic2, ic3], image_data):
             with col:
-                st.markdown(f"""
-                <div class="inspiration-card">
-                    <img src="{img_url}" alt="{label}" style="width:100%;height:180px;object-fit:cover;display:block;" />
-                    <div class="inspiration-label">✦ {label}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f'<div style="color:#a3c9a8;font-size:0.82rem;text-align:center;margin-bottom:0.3rem;">{label}</div>', unsafe_allow_html=True)
+                if img is not None:
+                    st.image(img, use_container_width=True)
+                else:
+                    st.markdown("""
+                    <div style="background:#1a3320;border:1px solid rgba(100,200,100,0.2);
+                         border-radius:10px;height:180px;display:flex;align-items:center;
+                         justify-content:center;color:#4a7a4a;font-size:0.85rem;">
+                        ⚠️ Image unavailable
+                    </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
