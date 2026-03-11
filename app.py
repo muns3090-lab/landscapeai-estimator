@@ -317,6 +317,208 @@ def clean_result_text(result_text):
     return "\n".join(l for l in lines if not l.startswith("IMAGE_SEARCHES:"))
 
 
+def generate_yard_images(form_data):
+    """
+    Generate yard preview images using PIL ImageDraw — no external calls, no SVG escaping issues.
+    Returns list of (PIL.Image, label) tuples for use with st.image().
+    """
+    from PIL import ImageDraw, ImageFont
+
+    color_map = {
+        "Earthy Neutrals":    {"sky": (180,210,240), "ground": (180,155,100), "plant1": (60,110,50),  "plant2": (90,150,65),  "accent": (200,160,80),  "hard": (170,140,100), "water": (80,170,220)},
+        "Bold and Vibrant":   {"sky": (160,210,255), "ground": (110,180,70),  "plant1": (220,60,80),  "plant2": (255,150,0),  "accent": (160,50,180),  "hard": (220,190,110), "water": (60,160,240)},
+        "Cool Blues and Whites": {"sky":(200,230,255),"ground":(140,200,140),"plant1":(70,140,200),"plant2":(120,200,220),"accent":(240,250,255),"hard":(190,210,230),"water":(80,160,230)},
+        "Desert Tones":       {"sky": (220,200,170), "ground": (200,160,100), "plant1": (130,150,80),  "plant2": (190,145,55), "accent": (220,110,60),  "hard": (195,165,115), "water": (80,170,200)},
+        "Lush All-Green":     {"sky": (140,210,240), "ground": (80,160,55),   "plant1": (35,100,25),  "plant2": (110,190,80), "accent": (160,220,110), "hard": (130,180,110), "water": (50,170,210)},
+        "Black, White and Grey": {"sky":(200,210,220),"ground":(150,155,160),"plant1":(50,55,50),"plant2":(100,105,100),"accent":(240,240,240),"hard":(115,120,120),"water":(100,160,200)},
+    }
+    scheme_key = next((k for k in color_map if k in form_data["color_scheme"]), "Earthy Neutrals")
+    c = color_map[scheme_key]
+
+    has_pool   = form_data["pool"] == "Yes"
+    has_patio  = form_data["patio_cover"] == "Yes"
+    has_lights = form_data["lighting"] == "Yes"
+    style      = form_data["style"]
+    ground     = form_data["ground_cover"]
+    W, H       = 640, 380
+
+    def make_base(sky_bottom_ratio=0.45):
+        img = Image.new("RGB", (W, H), c["sky"])
+        d = ImageDraw.Draw(img)
+        # Sky gradient bands
+        sky_h = int(H * sky_bottom_ratio)
+        for y in range(sky_h):
+            t = y / sky_h
+            r = int(c["sky"][0] * (1-t) + 230 * t)
+            g = int(c["sky"][1] * (1-t) + 240 * t)
+            b = int(c["sky"][2] * (1-t) + 255 * t)
+            d.line([(0, y), (W, y)], fill=(r, g, b))
+        # Ground fill
+        d.rectangle([0, sky_h, W, H], fill=c["ground"])
+        # Ground texture lines
+        for y in range(sky_h, H, 12):
+            alpha = int(30 * (y - sky_h) / (H - sky_h))
+            d.line([(0, y), (W, y)], fill=tuple(max(0, x-alpha) for x in c["ground"]))
+        return img, d, sky_h
+
+    def draw_tree(d, cx, base_y, r, col):
+        # trunk
+        d.rectangle([cx-4, base_y, cx+4, base_y+30], fill=(90, 55, 20))
+        # canopy layers
+        d.ellipse([cx-r, base_y-r*2, cx+r, base_y], fill=col)
+        d.ellipse([cx-int(r*.75), base_y-int(r*2.5), cx+int(r*.75), base_y-int(r*.4)], fill=tuple(min(255,x+20) for x in col))
+
+    def draw_agave(d, cx, base_y, size, col):
+        for angle_x, angle_y in [(-size,0),(size,0),(0,-size),(-size//2,-size//2),(size//2,-size//2),(-size//2,size//3),(size//2,size//3)]:
+            d.polygon([(cx, base_y-size//2), (cx+angle_x, base_y+angle_y), (cx+angle_x//3, base_y+angle_y+10)], fill=col)
+
+    def draw_palm(d, cx, base_y, height, col):
+        # trunk
+        for i in range(height):
+            offset = int(3 * (i/height) * (0.5 - (i%2)))
+            d.rectangle([cx-3+offset, base_y-i*4, cx+3+offset, base_y-i*4+5], fill=(140, 100, 50))
+        top_y = base_y - height * 4
+        # fronds
+        for dx, dy in [(-50,-20),(-30,-40),(0,-50),(30,-40),(50,-20),(-40,0),(40,0)]:
+            d.line([(cx, top_y), (cx+dx, top_y+dy)], fill=col, width=3)
+
+    def draw_pool(d, px, py, pw, ph):
+        d.ellipse([px, py, px+pw, py+ph], fill=c["water"])
+        d.ellipse([px+4, py+4, px+pw-4, py+ph-4], outline=(60,140,200), width=2)
+        # water shimmer
+        for i in range(3):
+            sx = px + 20 + i*30
+            d.arc([sx, py+ph//3, sx+30, py+2*ph//3], 0, 180, fill=(150,210,240), width=2)
+
+    def draw_patio(d, px, py, pw, ph):
+        # pavers
+        d.rectangle([px, py, px+pw, py+ph], fill=c["hard"])
+        for gx in range(px, px+pw, 40):
+            d.line([(gx, py), (gx, py+ph)], fill=tuple(max(0,x-30) for x in c["hard"]), width=1)
+        for gy in range(py, py+ph, 30):
+            d.line([(px, gy), (px+pw, gy)], fill=tuple(max(0,x-30) for x in c["hard"]), width=1)
+        # pergola posts & beam
+        for post_x in [px+10, px+pw-10]:
+            d.rectangle([post_x-5, py-60, post_x+5, py], fill=(140,100,60))
+        d.rectangle([px+5, py-65, px+pw-5, py-55], fill=(160,115,70))
+
+    def draw_lights(d, positions):
+        for lx, ly in positions:
+            d.ellipse([lx-6, ly-6, lx+6, ly+6], fill=(255,250,180))
+            d.ellipse([lx-3, ly-3, lx+3, ly+3], fill=(255,255,220))
+
+    # ── VIEW 1: Wide Overview ─────────────────────────────────────────────────
+    img1, d1, sky_h1 = make_base(0.42)
+    # house wall hint
+    d1.rectangle([0, sky_h1-30, W, sky_h1+20], fill=(220, 210, 195))
+    d1.rectangle([0, sky_h1+15, W, sky_h1+25], fill=(180,160,140))
+    # walkway
+    walk_pts = [(W//2-30, H), (W//2+30, H), (W//2+15, sky_h1+20), (W//2-15, sky_h1+20)]
+    d1.polygon(walk_pts, fill=c["hard"])
+    # pool
+    if has_pool:
+        draw_pool(d1, W-220, sky_h1+40, 160, 80)
+    # patio
+    if has_patio:
+        draw_patio(d1, 30, sky_h1+30, 180, 100)
+    # plants along back wall
+    if "Japanese" in style or "Zen" in style:
+        draw_tree(d1, 120, sky_h1+10, 30, c["plant1"])
+        draw_tree(d1, 280, sky_h1+8, 25, c["plant2"])
+        draw_tree(d1, 430, sky_h1+10, 35, c["plant1"])
+        draw_agave(d1, 550, sky_h1+25, 30, c["accent"])
+    elif "Desert" in style or "Xeriscape" in style:
+        draw_agave(d1, 100, sky_h1+20, 35, c["plant1"])
+        draw_agave(d1, 250, sky_h1+15, 40, c["plant2"])
+        draw_agave(d1, 400, sky_h1+20, 38, c["plant1"])
+        draw_palm(d1, 530, sky_h1+60, 12, c["plant2"])
+    elif "Tropical" in style:
+        draw_palm(d1, 100, sky_h1+80, 14, c["plant1"])
+        draw_tree(d1, 260, sky_h1+5, 38, c["plant2"])
+        draw_palm(d1, 430, sky_h1+80, 16, c["plant1"])
+        draw_tree(d1, 560, sky_h1+8, 30, c["plant2"])
+    else:
+        draw_tree(d1, 110, sky_h1+8, 28, c["plant1"])
+        draw_tree(d1, 260, sky_h1+6, 32, c["plant2"])
+        draw_tree(d1, 420, sky_h1+8, 28, c["plant1"])
+        draw_tree(d1, 560, sky_h1+10, 24, c["plant2"])
+    # sun
+    d1.ellipse([W-80, 20, W-30, 70], fill=(255, 245, 150))
+    if has_lights:
+        draw_lights(d1, [(80,sky_h1-10),(220,sky_h1-15),(380,sky_h1-10),(540,sky_h1-12)])
+    # label
+    d1.rectangle([8, H-28, 260, H-6], fill=(0,0,0,180))
+    d1.text((12, H-25), f"{style} · {ground.split('(')[0].strip()}", fill=(200,240,200))
+
+    # ── VIEW 2: Eye-Level ─────────────────────────────────────────────────────
+    img2, d2, sky_h2 = make_base(0.50)
+    # large foreground plants
+    if "Desert" in style or "Xeriscape" in style:
+        draw_agave(d2, 60,  sky_h2+20, 55, c["plant1"])
+        draw_agave(d2, W-60, sky_h2+20, 50, c["plant2"])
+        draw_palm(d2, 200, sky_h2+120, 18, c["plant1"])
+        draw_palm(d2, W-200, sky_h2+120, 16, c["plant2"])
+    elif "Tropical" in style:
+        draw_palm(d2, 70,  sky_h2+130, 20, c["plant1"])
+        draw_palm(d2, W-70, sky_h2+130, 18, c["plant2"])
+        draw_tree(d2, 210, sky_h2-20, 50, c["plant2"])
+        draw_tree(d2, W-210, sky_h2-15, 45, c["plant1"])
+    else:
+        draw_tree(d2, 70,  sky_h2-10, 45, c["plant1"])
+        draw_tree(d2, W-70, sky_h2-8, 42, c["plant2"])
+        draw_tree(d2, 200, sky_h2-25, 35, c["plant2"])
+        draw_tree(d2, W-200, sky_h2-20, 38, c["plant1"])
+    # hardscape path center
+    d2.polygon([(W//2-50, H), (W//2+50, H), (W//2+25, sky_h2+10), (W//2-25, sky_h2+10)], fill=c["hard"])
+    # patio
+    if has_patio:
+        draw_patio(d2, W//2-120, sky_h2+20, 240, 120)
+    # pool
+    if has_pool:
+        draw_pool(d2, W//2-90, sky_h2+150, 180, 80)
+    if has_lights:
+        draw_lights(d2, [(W//2-100, sky_h2-5),(W//2+100, sky_h2-5)])
+    # accent shrubs foreground
+    d2.ellipse([W//2-20, sky_h2+5, W//2+20, sky_h2+35], fill=c["accent"])
+    d2.rectangle([8, H-28, 240, H-6], fill=(0,0,0,180))
+    d2.text((12, H-25), f"Eye-Level · {form_data['color_scheme'].split('(')[0].strip()}", fill=(200,240,200))
+
+    # ── VIEW 3: Garden Detail ─────────────────────────────────────────────────
+    img3, d3, sky_h3 = make_base(0.35)
+    # large close-up plants
+    if "Desert" in style or "Xeriscape" in style:
+        draw_agave(d3, 100, sky_h3+30, 70, c["plant1"])
+        draw_agave(d3, 280, sky_h3+20, 80, c["plant2"])
+        draw_agave(d3, 460, sky_h3+25, 75, c["plant1"])
+        draw_palm(d3, W-80, sky_h3+140, 22, c["plant2"])
+    elif "Tropical" in style:
+        draw_palm(d3, 80,  sky_h3+150, 24, c["plant1"])
+        draw_tree(d3, 260, sky_h3-5, 65, c["plant2"])
+        draw_palm(d3, 450, sky_h3+150, 22, c["plant1"])
+        draw_tree(d3, W-80, sky_h3+0, 55, c["plant2"])
+    else:
+        draw_tree(d3, 90,  sky_h3-5,  60, c["plant1"])
+        draw_tree(d3, 280, sky_h3-10, 70, c["plant2"])
+        draw_tree(d3, 470, sky_h3-5,  62, c["plant1"])
+        draw_agave(d3, W-70, sky_h3+30, 40, c["accent"])
+    # decorative rocks
+    for rx, ry, rw, rh in [(160,H-60,40,22),(320,H-55,30,18),(480,H-62,36,20),(240,H-50,25,15)]:
+        d3.ellipse([rx, ry, rx+rw, ry+rh], fill=(155,150,145))
+        d3.ellipse([rx+3, ry+3, rx+rw-3, ry+rh-3], fill=(170,165,160))
+    # flowers
+    for fx, fy in [(200,sky_h3+40),(380,sky_h3+35),(150,sky_h3+60),(440,sky_h3+50),(310,sky_h3+45)]:
+        d3.ellipse([fx-8,fy-8,fx+8,fy+8], fill=c["accent"])
+        d3.ellipse([fx-4,fy-4,fx+4,fy+4], fill=(255,255,200))
+    d3.rectangle([8, H-28, 260, H-6], fill=(0,0,0,180))
+    d3.text((12, H-25), f"Garden Detail · {form_data['plant_maintenance'].split('(')[0].strip()}", fill=(200,240,200))
+
+    return [
+        (img1, "🏡 Wide Overview"),
+        (img2, "🌅 Eye-Level View"),
+        (img3, "🌿 Garden Detail"),
+    ]
+
+
 def generate_yard_svgs(form_data):
     """
     Ask Claude to generate 3 SVG yard illustrations based on user inputs.
@@ -563,50 +765,41 @@ IRRIGATION: {form_data['irrigation']}
 STYLE: {form_data['style']}
 SPECIAL REQUESTS: {form_data['special_requests'] or 'None'}
 
-Provide your estimate using ONLY the format below. Do not use markdown tables anywhere — use only bullet points and ## headers.
+Respond with a JSON object (no markdown fences, just raw JSON) with exactly these keys:
 
-## 1. Project Feasibility
-Write 2-3 sentences on whether the budget is realistic and what is achievable.
+{{
+  "feasibility": "2-3 sentence paragraph",
+  "design_concept": "3-4 vivid sentence paragraph",
+  "cost_breakdown": [
+    {{"item": "Site Prep & Demolition", "cost": "$X,XXX – $X,XXX", "notes": "brief detail"}},
+    {{"item": "Ground Cover", "cost": "$X,XXX – $X,XXX", "notes": "brief detail"}},
+    {{"item": "Plants & Trees", "cost": "$X,XXX – $X,XXX", "notes": "SoCal plant names"}},
+    {{"item": "Hardscape", "cost": "$X,XXX – $X,XXX", "notes": "brief detail"}},
+    {{"item": "Labor", "cost": "$X,XXX – $X,XXX", "notes": "SoCal rates $45-75/hr"}},
+    {{"item": "Contingency (10%)", "cost": "$X,XXX", "notes": ""}},
+    {{"item": "TOTAL ESTIMATE", "cost": "$XX,XXX – $XX,XXX", "notes": "Full project range"}}
+  ],
+  "timeline": [
+    {{"period": "Week 1–2", "phase": "Phase name", "activities": "What happens"}},
+    {{"period": "Week 3–4", "phase": "Phase name", "activities": "What happens"}}
+  ],
+  "inspirations": [
+    {{"name": "Style Name", "description": "Plants and materials"}},
+    {{"name": "Style Name", "description": "Plants and materials"}},
+    {{"name": "Style Name", "description": "Plants and materials"}}
+  ],
+  "savings_tips": ["Tip 1", "Tip 2", "Tip 3"],
+  "next_steps": ["Step 1", "Step 2", "Step 3"]
+}}
 
-## 2. Recommended Design Concept
-Write 3-4 vivid sentences describing exactly how the yard will look: plants, materials, colors, layout.
-
-## 3. Detailed Cost Breakdown
-Use this exact bullet format for every line item — no tables, no pipes:
-- **Site Prep & Demolition:** $X,XXX – $X,XXX
-- **Ground Cover ({form_data['ground_cover']}):** $X,XXX – $X,XXX
-- **Plants & Trees:** $X,XXX – $X,XXX
-- **Hardscape (patio, walkways, edging):** $X,XXX – $X,XXX
-- **Pool:** $X,XXX – $X,XXX (only if selected)
-- **Patio Cover / Pergola:** $X,XXX – $X,XXX (only if selected)
-- **Irrigation System:** $X,XXX – $X,XXX (only if selected)
-- **Outdoor Lighting:** $X,XXX – $X,XXX (only if selected)
-- **Labor (SoCal rates):** $X,XXX – $X,XXX
-- **Contingency (10%):** $X,XXX
-- **TOTAL ESTIMATE: $XX,XXX – $XX,XXX**
-
-## 4. Project Timeline
-Use this exact bullet format:
-- **Week 1–2:** Activity description
-- **Week 3–4:** Activity description
-(and so on until project complete)
-
-## 5. Top 3 Design Inspirations
-- **[Style Name]:** Description with specific SoCal plant names and materials
-- **[Style Name]:** Description with specific SoCal plant names and materials
-- **[Style Name]:** Description with specific SoCal plant names and materials
-
-## 6. Money-Saving Tips
-- **Tip 1:** Specific actionable advice
-- **Tip 2:** Specific actionable advice
-- **Tip 3:** Specific actionable advice
-
-## 7. Recommended Next Steps
-- Step 1
-- Step 2
-- Step 3
-
-Use SoCal plant names (Bird of Paradise, Agave, Mexican Sage, Kangaroo Paw, etc.) and current SoCal contractor rates. Do not use pipe characters or markdown tables anywhere.
+Rules:
+- Add pool row only if SWIMMING POOL is Yes
+- Add patio/pergola row only if PATIO COVER is Yes
+- Add irrigation row only if IRRIGATION is Yes
+- Add lighting row only if LIGHTING is Yes
+- Use SoCal plant names (Bird of Paradise, Agave, Mexican Sage, Kangaroo Paw, etc.)
+- Use current SoCal contractor rates
+- Return ONLY the JSON object, no other text
 """
 
     content.append({"type": "text", "text": prompt})
@@ -616,7 +809,87 @@ Use SoCal plant names (Bird of Paradise, Agave, Mexican Sage, Kangaroo Paw, etc.
         max_tokens=2800,
         messages=[{"role": "user", "content": content}]
     )
-    return response.content[0].text
+    raw = response.content[0].text.strip()
+    # Strip markdown fences if present
+    raw = re.sub(r"^```json\s*", "", raw)
+    raw = re.sub(r"^```\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    try:
+        import json
+        return json.loads(raw)
+    except Exception:
+        return {"_raw": raw}
+
+
+def render_estimate_html(data):
+    """Convert parsed JSON estimate into styled HTML with proper tables."""
+
+    TH = "background:#1e4d25;color:#7ecf7e;font-weight:600;padding:0.55rem 0.85rem;text-align:left;border:1px solid rgba(100,200,100,0.25);font-size:0.88rem;"
+    TD = "color:#dff5df;padding:0.5rem 0.85rem;border:1px solid rgba(100,200,100,0.12);font-size:0.87rem;line-height:1.5;"
+    TD_TOTAL = "color:#4ade80;font-weight:700;padding:0.6rem 0.85rem;border:1px solid rgba(100,200,100,0.3);font-size:0.95rem;background:rgba(74,222,128,0.08);"
+    TABLE = "width:100%;border-collapse:collapse;margin-bottom:1.5rem;"
+    H2 = "font-family:'Playfair Display',serif;color:#7ecf7e;font-size:1.2rem;margin:1.6rem 0 0.7rem;border-bottom:1px solid rgba(100,200,100,0.2);padding-bottom:0.35rem;"
+    P = "color:#dff5df;line-height:1.8;margin-bottom:1rem;"
+
+    if "_raw" in data:
+        return f'<p style="{P}">{data["_raw"]}</p>'
+
+    html = []
+
+    # 1. Feasibility
+    html.append(f'<h2 style="{H2}">1. Project Feasibility</h2>')
+    html.append(f'<p style="{P}">{data.get("feasibility","")}</p>')
+
+    # 2. Design Concept
+    html.append(f'<h2 style="{H2}">2. Recommended Design Concept</h2>')
+    html.append(f'<p style="{P}">{data.get("design_concept","")}</p>')
+
+    # 3. Cost Breakdown Table
+    html.append(f'<h2 style="{H2}">3. Detailed Cost Breakdown</h2>')
+    html.append(f'<table style="{TABLE}">')
+    html.append(f'<tr><th style="{TH}">Line Item</th><th style="{TH}">Cost Range</th><th style="{TH}">Notes</th></tr>')
+    for row in data.get("cost_breakdown", []):
+        is_total = "TOTAL" in row.get("item","").upper()
+        td = TD_TOTAL if is_total else TD
+        html.append(f'<tr><td style="{td}"><strong style="color:{"#4ade80" if is_total else "#a8e6a8"}">{row.get("item","")}</strong></td>'
+                    f'<td style="{td}">{row.get("cost","")}</td>'
+                    f'<td style="{td}">{row.get("notes","")}</td></tr>')
+    html.append("</table>")
+
+    # 4. Timeline Table
+    html.append(f'<h2 style="{H2}">4. Project Timeline</h2>')
+    html.append(f'<table style="{TABLE}">')
+    html.append(f'<tr><th style="{TH}">Period</th><th style="{TH}">Phase</th><th style="{TH}">Activities</th></tr>')
+    for row in data.get("timeline", []):
+        html.append(f'<tr><td style="{TD}"><strong style="color:#a8e6a8">{row.get("period","")}</strong></td>'
+                    f'<td style="{TD}">{row.get("phase","")}</td>'
+                    f'<td style="{TD}">{row.get("activities","")}</td></tr>')
+    html.append("</table>")
+
+    # 5. Inspirations
+    html.append(f'<h2 style="{H2}">5. Top 3 Design Inspirations</h2>')
+    html.append(f'<table style="{TABLE}">')
+    html.append(f'<tr><th style="{TH}">Style</th><th style="{TH}">Description</th></tr>')
+    for row in data.get("inspirations", []):
+        html.append(f'<tr><td style="{TD}"><strong style="color:#a8e6a8">{row.get("name","")}</strong></td>'
+                    f'<td style="{TD}">{row.get("description","")}</td></tr>')
+    html.append("</table>")
+
+    # 6. Savings Tips
+    html.append(f'<h2 style="{H2}">6. Money-Saving Tips</h2>')
+    html.append(f'<ul style="color:#dff5df;padding-left:1.4rem;margin-bottom:1.2rem;">')
+    for tip in data.get("savings_tips", []):
+        html.append(f'<li style="margin-bottom:0.4rem;line-height:1.7;">{tip}</li>')
+    html.append("</ul>")
+
+    # 7. Next Steps
+    html.append(f'<h2 style="{H2}">7. Recommended Next Steps</h2>')
+    html.append(f'<ol style="color:#dff5df;padding-left:1.4rem;margin-bottom:1rem;">')
+    for step in data.get("next_steps", []):
+        html.append(f'<li style="margin-bottom:0.4rem;line-height:1.7;">{step}</li>')
+    html.append("</ol>")
+
+    return "\n".join(html)
 
 
 # ── FORM ──────────────────────────────────────────────────────────────────────
@@ -726,7 +999,7 @@ if generate:
             image_b64_list = [encode_image(f) for f in (uploaded_files or [])[:4]]
             result = get_estimate(form_data, image_b64_list)
 
-        display_result = clean_result_text(result)
+        display_result = render_estimate_html(result)
 
         # ── Summary header ──
         st.markdown(f"""
@@ -748,26 +1021,16 @@ if generate:
         </div>
         """, unsafe_allow_html=True)
 
-        svg_data = generate_yard_svgs(form_data)
+        img_data = generate_yard_images(form_data)
         ic1, ic2, ic3 = st.columns(3)
-        for col, (svg_str, label) in zip([ic1, ic2, ic3], svg_data):
+        for col, (pil_img, label) in zip([ic1, ic2, ic3], img_data):
             with col:
-                st.markdown(
-                    f'<div style="background:#1a3320;border:1px solid rgba(100,200,100,0.25);'
-                    f'border-radius:12px;overflow:hidden;padding:0;">'
-                    f'{svg_str}'
-                    f'<div style="color:#a3c9a8;font-size:0.8rem;text-align:center;padding:0.4rem 0;'
-                    f'background:rgba(0,0,0,0.3);">{label}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
+                st.image(pil_img, use_container_width=True, caption=label)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Estimate text — back to st.markdown for clean table/bullet formatting ──
-        st.markdown('<div class="result-outer">', unsafe_allow_html=True)
-        st.markdown(display_result)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # ── Estimate HTML with tables ──
+        st.markdown(f'<div class="result-outer">{display_result}</div>', unsafe_allow_html=True)
 
         st.markdown("""
         <div style="text-align:center;margin-top:2rem;padding:1rem;
