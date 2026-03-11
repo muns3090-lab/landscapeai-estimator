@@ -319,77 +319,78 @@ def clean_result_text(result_text):
 
 def generate_yard_images_stability(form_data):
     """
-    Call Stability AI SDXL to generate photorealistic yard images.
-    Returns list of (PIL.Image, label) or None on failure.
+    Call Stability AI Stable Image Core (current API as of 2025).
+    Returns list of (PIL.Image, label), shows st.error on failure for debugging.
     """
     import requests as req
 
     api_key = st.secrets.get("STABILITY_API_KEY") or os.getenv("STABILITY_API_KEY")
     if not api_key:
+        st.error("STABILITY_API_KEY not found in Streamlit secrets.")
         return None
 
-    has_pool   = form_data["pool"] == "Yes"
-    has_patio  = form_data["patio_cover"] == "Yes"
-    has_lights = form_data["lighting"] == "Yes"
+    has_pool    = form_data["pool"] == "Yes"
+    has_patio   = form_data["patio_cover"] == "Yes"
+    has_lights  = form_data["lighting"] == "Yes"
     maintenance = form_data["plant_maintenance"].split("(")[0].strip().lower()
-    style   = form_data["style"]
-    ground  = form_data["ground_cover"]
-    colors  = form_data["color_scheme"].split("(")[0].strip()
+    style       = form_data["style"]
+    ground      = form_data["ground_cover"]
+    colors      = form_data["color_scheme"].split("(")[0].strip()
 
-    pool_txt   = "with a sparkling swimming pool," if has_pool else ""
-    patio_txt  = "with a wooden pergola patio cover and outdoor seating," if has_patio else ""
-    lights_txt = "with warm string lights and landscape lighting," if has_lights else ""
+    pool_txt   = "sparkling swimming pool," if has_pool  else ""
+    patio_txt  = "wooden pergola patio cover with outdoor seating," if has_patio else ""
+    lights_txt = "warm string lights and landscape lighting," if has_lights else ""
 
     base = (
-        f"Professional real estate photography of a beautiful {style} style "
+        f"Professional DSLR real estate photography, beautiful {style} style "
         f"Southern California residential backyard, {ground} ground cover, "
-        f"{colors} color palette, {pool_txt} {patio_txt} {lights_txt}"
-        f"Bird of Paradise plants, Agave, Mexican Sage, Kangaroo Paw, "
+        f"{colors} color palette, {pool_txt} {patio_txt} {lights_txt} "
+        f"Bird of Paradise, Agave, Mexican Sage, Kangaroo Paw, "
         f"{maintenance} drought-tolerant SoCal plants, "
-        f"sunny California afternoon light, photorealistic DSLR photo, "
-        f"8k resolution, sharp focus, no people, professional landscaping"
+        f"bright sunny California afternoon, photorealistic, 8k, sharp focus, no people"
     )
 
     negative = (
         "cartoon, illustration, painting, drawing, anime, CGI, 3d render, "
-        "people, humans, ugly, blurry, low quality, watermark, text, fake"
+        "flat design, vector art, people, humans, ugly, blurry, watermark, text"
     )
 
     views = [
-        (base + ", wide overhead establishing shot showing full yard layout", "Wide Overview"),
-        (base + ", eye-level ground perspective standing in the yard, golden hour warm lighting", "Eye-Level View"),
-        (base + ", close-up detail of plants textures and hardscape materials", "Garden Detail"),
+        (base + ", wide establishing shot of full yard, aerial perspective", "Wide Overview"),
+        (base + ", eye-level view standing inside the yard, golden hour lighting", "Eye-Level View"),
+        (base + ", close-up of plants textures stones and hardscape detail", "Garden Detail"),
     ]
 
     results = []
-    url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
+    # Current Stability AI REST endpoint (Stable Image Core, 2024-2025)
+    url = "https://api.stability.ai/v2beta/stable-image/generate/core"
     headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
+        "authorization": f"Bearer {api_key}",
+        "accept": "image/*",
     }
 
     for prompt_text, label in views:
         try:
-            body = {
-                "text_prompts": [
-                    {"text": prompt_text, "weight": 1.0},
-                    {"text": negative,    "weight": -1.0},
-                ],
-                "cfg_scale": 8,
-                "height": 512,
-                "width": 896,
-                "samples": 1,
-                "steps": 30,
-            }
-            resp = req.post(url, headers=headers, json=body, timeout=90)
+            resp = req.post(
+                url,
+                headers=headers,
+                files={"none": ""},
+                data={
+                    "prompt": prompt_text,
+                    "negative_prompt": negative,
+                    "aspect_ratio": "16:9",
+                    "output_format": "jpeg",
+                },
+                timeout=90,
+            )
             if resp.status_code == 200:
-                img_b64 = resp.json()["artifacts"][0]["base64"]
-                img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
+                img = Image.open(io.BytesIO(resp.content)).convert("RGB")
                 results.append((img, label))
             else:
+                st.error(f"Stability AI error {resp.status_code} for '{label}': {resp.text[:300]}")
                 results.append((None, label))
-        except Exception:
+        except Exception as e:
+            st.error(f"Stability AI exception for '{label}': {str(e)[:200]}")
             results.append((None, label))
 
     return results
