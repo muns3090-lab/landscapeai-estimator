@@ -5,9 +5,79 @@ import base64
 import io
 import os
 import re
+import json
+import time
+import hashlib
+from datetime import datetime, date
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── RATE LIMITING ──────────────────────────────────────────────────────────────
+RATE_LIMIT_FILE = "/tmp/landscapeai_usage.json"
+DAILY_LIMIT = 5   # max estimates per IP per day
+SESSION_LIMIT = 3  # max estimates per browser session
+
+def _load_usage():
+    try:
+        with open(RATE_LIMIT_FILE, "r") as f:
+            data = json.load(f)
+        # Purge old dates to keep file small
+        today = str(date.today())
+        return {k: v for k, v in data.items() if k.startswith(today)}
+    except Exception:
+        return {}
+
+def _save_usage(data):
+    try:
+        with open(RATE_LIMIT_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+def check_rate_limit():
+    """Returns (allowed: bool, reason: str, remaining: int)"""
+    today = str(date.today())
+
+    # Session-level check
+    if "estimate_count" not in st.session_state:
+        st.session_state.estimate_count = 0
+    if st.session_state.estimate_count >= SESSION_LIMIT:
+        return False, f"You've generated {SESSION_LIMIT} estimates this session. Please refresh to start a new session.", 0
+
+    # IP-level daily check (hashed for privacy)
+    try:
+        headers = st.context.headers
+        raw_ip = headers.get("X-Forwarded-For", headers.get("X-Real-Ip", "unknown"))
+    except Exception:
+        raw_ip = "unknown"
+    ip_hash = hashlib.md5(raw_ip.encode()).hexdigest()[:12]
+    key = f"{today}_{ip_hash}"
+
+    usage = _load_usage()
+    count = usage.get(key, 0)
+
+    if count >= DAILY_LIMIT:
+        return False, f"Daily limit of {DAILY_LIMIT} estimates reached for your connection. Come back tomorrow!", 0
+
+    remaining = min(DAILY_LIMIT - count, SESSION_LIMIT - st.session_state.estimate_count)
+    return True, "", remaining
+
+def record_usage():
+    today = str(date.today())
+    try:
+        headers = st.context.headers
+        raw_ip = headers.get("X-Forwarded-For", headers.get("X-Real-Ip", "unknown"))
+    except Exception:
+        raw_ip = "unknown"
+    ip_hash = hashlib.md5(raw_ip.encode()).hexdigest()[:12]
+    key = f"{today}_{ip_hash}"
+
+    usage = _load_usage()
+    usage[key] = usage.get(key, 0) + 1
+    _save_usage(usage)
+    st.session_state.estimate_count = st.session_state.get("estimate_count", 0) + 1
+
 
 st.set_page_config(
     page_title="LandscapeAI Estimator",
@@ -1292,11 +1362,56 @@ with col_right:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ── API KEY INPUT ─────────────────────────────────────────────────────────────
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("""
+<div style="background:linear-gradient(135deg,#0f2a12,#162e1a);border:1px solid rgba(100,200,100,0.25);
+     border-radius:16px;padding:1.4rem 1.6rem;margin-bottom:0.5rem;">
+    <div style="font-family:'Playfair Display',serif;font-size:1.05rem;color:#7ecf7e;margin-bottom:0.4rem;">
+        \U0001f511 Free Image Generation Key
+    </div>
+    <div style="color:#a3c9a8;font-size:0.83rem;line-height:1.6;margin-bottom:0.6rem;">
+        Photorealistic yard previews are powered by <strong style="color:#7ecf7e;">Stability AI</strong>.
+        Get your free key in 60 seconds at
+        <a href="https://platform.stability.ai/account/keys" target="_blank"
+           style="color:#4ade80;">platform.stability.ai</a>
+        \u2014 free tier includes 25 images/month, no credit card required.<br>
+        <span style="color:#4a7a55;font-size:0.78rem;">Your key is never stored and is only used for this session.</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+k1, k2, k3 = st.columns([1, 2, 1])
+with k2:
+    user_stability_key = st.text_input(
+        "Stability AI Key",
+        type="password",
+        placeholder="sk-...  (paste your Stability AI key here)",
+        label_visibility="collapsed",
+    )
+
 # ── GENERATE BUTTON ───────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
+
+# Show remaining count
+_allowed, _reason, _remaining = check_rate_limit()
+if not _allowed:
+    st.markdown(f"""
+    <div style="text-align:center;color:#f87171;font-size:0.85rem;margin-bottom:0.5rem;">
+        ⏱️ {_reason}
+    </div>""", unsafe_allow_html=True)
+else:
+    st.markdown(f"""
+    <div style="text-align:center;color:#5a8a5a;font-size:0.8rem;margin-bottom:0.5rem;">
+        ✅ {_remaining} free estimate{"s" if _remaining != 1 else ""} remaining this session
+    </div>""", unsafe_allow_html=True)
+
 b1, b2, b3 = st.columns([1, 2, 1])
 with b2:
-    generate = st.button("🌿 Generate My Free Estimate", use_container_width=True)
+    generate = st.button(
+        "🌿 Generate My Free Estimate",
+        use_container_width=True,
+        disabled=not _allowed
+    )
 
 # ── RESULTS ───────────────────────────────────────────────────────────────────
 if generate:
@@ -1304,6 +1419,29 @@ if generate:
     if not api_key:
         st.error("API key not found. Add ANTHROPIC_API_KEY to Streamlit secrets.")
     else:
+        allowed, reason, remaining = check_rate_limit()
+        if not allowed:
+            st.markdown(f"""
+            <div style="background:#2a0f0f;border:1px solid rgba(255,100,100,0.3);border-radius:12px;
+                 padding:1.2rem 1.4rem;text-align:center;margin:1rem 0;">
+                <div style="font-size:1.5rem;margin-bottom:0.4rem;">⏱️</div>
+                <div style="color:#f87171;font-size:1rem;font-weight:600;margin-bottom:0.3rem;">Usage Limit Reached</div>
+                <div style="color:#fca5a5;font-size:0.87rem;">{reason}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
+
+        # User-supplied key takes priority; fall back to secrets
+        resolved_stability_key = (
+            user_stability_key.strip()
+            or st.secrets.get("STABILITY_API_KEY", "")
+            or os.getenv("STABILITY_API_KEY", "")
+        )
+        os.environ["STABILITY_API_KEY"] = resolved_stability_key
+
+        if remaining <= 1:
+            st.info(f"💡 This is your last free estimate for this session.")
+
         with st.spinner("🌱 Our AI landscaping expert is designing your space..."):
             form_data = {
                 "length": length, "width": width, "budget": budget,
@@ -1319,6 +1457,7 @@ if generate:
             }
             image_b64_list = [encode_image(f) for f in (uploaded_files or [])[:4]]
             result = get_estimate(form_data, image_b64_list)
+            record_usage()
 
         display_result = render_estimate_html(result)
 
