@@ -168,7 +168,8 @@ def encode_image(uploaded_file):
 
 # ── Helper: call Claude ───────────────────────────────────────────────────────
 def get_estimate(form_data: dict, image_b64_list: list) -> str:
-    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+client = Anthropic(api_key=api_key)
 
     content = []
     for img in image_b64_list:
@@ -324,7 +325,8 @@ with bcol2:
 
 # ── Results ───────────────────────────────────────────────────────────────────
 if generate:
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+if not api_key:
         st.error("⚠️ Anthropic API key not found. Please add it to your .env file.")
     else:
         with st.spinner("🌱 Our AI landscaping expert is designing your space..."):
