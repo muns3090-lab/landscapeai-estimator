@@ -823,6 +823,242 @@ def generate_yard_svgs(form_data):
     return svgs
 
 
+def generate_pdf(form_data, estimate_data, yard_images, sqft):
+    """Build a branded PDF report with images and all estimate sections."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, Image as RLImage, PageBreak
+    )
+    from reportlab.lib import colors
+    from reportlab.lib.utils import ImageReader
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        leftMargin=0.75*inch, rightMargin=0.75*inch,
+        topMargin=0.75*inch, bottomMargin=0.75*inch
+    )
+
+    # ── Colors ──────────────────────────────────────────────────────────────
+    GREEN_DARK  = colors.HexColor("#0d1f0f")
+    GREEN_MID   = colors.HexColor("#1e4d25")
+    GREEN_LIGHT = colors.HexColor("#7ecf7e")
+    GREEN_PALE  = colors.HexColor("#dff5df")
+    GREEN_ACCENT= colors.HexColor("#4ade80")
+    WHITE       = colors.white
+    GREY_LIGHT  = colors.HexColor("#f0f7f0")
+
+    # ── Styles ───────────────────────────────────────────────────────────────
+    def S(name, **kw):
+        return ParagraphStyle(name, **kw)
+
+    sTitle   = S("Title",   fontSize=26, textColor=GREEN_LIGHT,  alignment=TA_CENTER, spaceAfter=4,  fontName="Helvetica-Bold")
+    sTagline = S("Tagline", fontSize=10, textColor=GREEN_LIGHT,  alignment=TA_CENTER, spaceAfter=14, fontName="Helvetica")
+    sMeta    = S("Meta",    fontSize=10, textColor=GREEN_PALE,   alignment=TA_CENTER, spaceAfter=6,  fontName="Helvetica")
+    sH2      = S("H2",      fontSize=13, textColor=GREEN_LIGHT,  spaceAfter=6,  spaceBefore=16, fontName="Helvetica-Bold")
+    sBody    = S("Body",    fontSize=9,  textColor=GREEN_PALE,   spaceAfter=6,  leading=14,     fontName="Helvetica")
+    sSmall   = S("Small",   fontSize=7,  textColor=GREEN_LIGHT,  alignment=TA_CENTER, fontName="Helvetica")
+    sImgCap  = S("ImgCap",  fontSize=8,  textColor=GREEN_LIGHT,  alignment=TA_CENTER, spaceAfter=4, fontName="Helvetica-Oblique")
+
+    story = []
+    W = letter[0] - 1.5*inch  # usable width
+
+    # ── HEADER BANNER ────────────────────────────────────────────────────────
+    header_data = [[
+        Paragraph("🌿 LandscapeAI Estimator", sTitle),
+    ]]
+    header_tbl = Table(header_data, colWidths=[W])
+    header_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), GREEN_DARK),
+        ("TOPPADDING",    (0,0), (-1,-1), 18),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("LEFTPADDING",   (0,0), (-1,-1), 12),
+        ("RIGHTPADDING",  (0,0), (-1,-1), 12),
+        ("ROUNDEDCORNERS", [8]),
+    ]))
+    story.append(header_tbl)
+    story.append(Paragraph("Smart Estimates for Beautiful Outdoor Spaces", sTagline))
+    story.append(HRFlowable(width=W, thickness=1, color=GREEN_MID, spaceAfter=8))
+
+    # ── PROJECT SUMMARY BOX ──────────────────────────────────────────────────
+    summary_rows = [
+        ["Style", form_data["style"], "Ground Cover", form_data["ground_cover"]],
+        ["Budget", f"${form_data['budget']:,}", "Area", f"{sqft:,} sq ft"],
+        ["Color Scheme", form_data["color_scheme"].split("(")[0].strip(), "Maintenance", form_data["plant_maintenance"].split("(")[0].strip()],
+        ["Pool", form_data["pool"], "Patio Cover", form_data["patio_cover"]],
+        ["Irrigation", form_data["irrigation"], "Lighting", form_data["lighting"]],
+    ]
+    summary_table_data = [[
+        Paragraph(f"<b><font color='#7ecf7e'>{r[0]}</font></b>", sBody),
+        Paragraph(str(r[1]), sBody),
+        Paragraph(f"<b><font color='#7ecf7e'>{r[2]}</font></b>", sBody),
+        Paragraph(str(r[3]), sBody),
+    ] for r in summary_rows]
+
+    stbl = Table(summary_table_data, colWidths=[1.2*inch, 2.3*inch, 1.2*inch, 2.3*inch])
+    stbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (-1,-1), GREEN_MID),
+        ("TEXTCOLOR",     (0,0), (-1,-1), GREEN_PALE),
+        ("ROWBACKGROUNDS",(0,0), (-1,-1), [GREEN_MID, colors.HexColor("#162e1a")]),
+        ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#2d5c35")),
+        ("TOPPADDING",    (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+        ("LEFTPADDING",   (0,0), (-1,-1), 8),
+    ]))
+    story.append(stbl)
+    story.append(Spacer(1, 14))
+
+    # ── DESIGN PREVIEWS ───────────────────────────────────────────────────────
+    valid_imgs = [(img, lbl) for img, lbl in yard_images if img is not None]
+    if valid_imgs:
+        story.append(Paragraph("Design Previews", sH2))
+        story.append(HRFlowable(width=W, thickness=0.5, color=GREEN_MID, spaceAfter=6))
+        img_w = (W - 0.2*inch) / min(len(valid_imgs), 3)
+        img_cells = []
+        cap_cells = []
+        for pil_img, lbl in valid_imgs[:3]:
+            img_buf = io.BytesIO()
+            pil_img.save(img_buf, format="JPEG", quality=88)
+            img_buf.seek(0)
+            img_h = img_w * (pil_img.height / pil_img.width)
+            rl_img = RLImage(img_buf, width=img_w - 0.05*inch, height=img_h - 0.05*inch)
+            img_cells.append(rl_img)
+            cap_cells.append(Paragraph(lbl, sImgCap))
+
+        img_tbl = Table([img_cells], colWidths=[img_w]*len(img_cells))
+        img_tbl.setStyle(TableStyle([
+            ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+            ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+            ("TOPPADDING",    (0,0), (-1,-1), 2),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+        ]))
+        cap_tbl = Table([cap_cells], colWidths=[img_w]*len(cap_cells))
+        cap_tbl.setStyle(TableStyle([("ALIGN",(0,0),(-1,-1),"CENTER")]))
+        story.append(img_tbl)
+        story.append(cap_tbl)
+        story.append(Spacer(1, 10))
+
+    # ── ESTIMATE SECTIONS ─────────────────────────────────────────────────────
+    def section(title, content_fn):
+        story.append(Paragraph(title, sH2))
+        story.append(HRFlowable(width=W, thickness=0.5, color=GREEN_MID, spaceAfter=4))
+        content_fn()
+        story.append(Spacer(1, 6))
+
+    def tbl_style(data, col_widths, header=True):
+        t = Table(data, colWidths=col_widths, repeatRows=1 if header else 0)
+        styles_list = [
+            ("BACKGROUND",    (0,0), (-1, 0 if header else -1), GREEN_MID),
+            ("TEXTCOLOR",     (0,0), (-1, 0 if header else -1), GREEN_LIGHT),
+            ("FONTNAME",      (0,0), (-1, 0 if header else -1), "Helvetica-Bold"),
+            ("FONTSIZE",      (0,0), (-1,-1), 8),
+            ("BACKGROUND",    (0,1), (-1,-1), colors.HexColor("#0f2a12")),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#0f2a12"), colors.HexColor("#162e1a")]),
+            ("TEXTCOLOR",     (0,1), (-1,-1), GREEN_PALE),
+            ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#2d5c35")),
+            ("TOPPADDING",    (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+            ("LEFTPADDING",   (0,0), (-1,-1), 7),
+            ("VALIGN",        (0,0), (-1,-1), "TOP"),
+        ]
+        t.setStyle(TableStyle(styles_list))
+        return t
+
+    # 1. Feasibility
+    if "feasibility" in estimate_data:
+        section("1. Project Feasibility", lambda: story.append(Paragraph(estimate_data["feasibility"], sBody)))
+
+    # 2. Design Concept
+    if "design_concept" in estimate_data:
+        section("2. Recommended Design Concept", lambda: story.append(Paragraph(estimate_data["design_concept"], sBody)))
+
+    # 3. Cost Breakdown
+    if "cost_breakdown" in estimate_data:
+        def cost_content():
+            rows = [[
+                Paragraph("<b>Line Item</b>", sBody),
+                Paragraph("<b>Cost Range</b>", sBody),
+                Paragraph("<b>Notes</b>", sBody),
+            ]]
+            for row in estimate_data["cost_breakdown"]:
+                is_total = "TOTAL" in row.get("item","").upper()
+                color = "<font color='#4ade80'><b>" if is_total else "<font color='#a8e6a8'>"
+                end   = "</b></font>" if is_total else "</font>"
+                rows.append([
+                    Paragraph(f"{color}{row.get('item','')}{end}", sBody),
+                    Paragraph(f"{color}{row.get('cost','')}{end}", sBody),
+                    Paragraph(row.get("notes",""), sBody),
+                ])
+                if is_total:
+                    # highlight total row
+                    idx = len(rows) - 1
+            t = tbl_style(rows, [2.2*inch, 1.4*inch, W-3.6*inch])
+            # highlight last (total) row
+            t.setStyle(TableStyle([("BACKGROUND", (0, len(rows)-1), (-1, len(rows)-1), colors.HexColor("#1a4020"))]))
+            story.append(t)
+        section("3. Detailed Cost Breakdown", cost_content)
+
+    # 4. Timeline
+    if "timeline" in estimate_data:
+        def tl_content():
+            rows = [[
+                Paragraph("<b>Period</b>", sBody),
+                Paragraph("<b>Phase</b>", sBody),
+                Paragraph("<b>Activities</b>", sBody),
+            ]]
+            for row in estimate_data["timeline"]:
+                rows.append([
+                    Paragraph(f"<b><font color='#a8e6a8'>{row.get('period','')}</font></b>", sBody),
+                    Paragraph(row.get("phase",""), sBody),
+                    Paragraph(row.get("activities",""), sBody),
+                ])
+            story.append(tbl_style(rows, [1.1*inch, 1.5*inch, W-2.6*inch]))
+        section("4. Project Timeline", tl_content)
+
+    # 5. Inspirations
+    if "inspirations" in estimate_data:
+        def insp_content():
+            rows = [[Paragraph("<b>Style</b>", sBody), Paragraph("<b>Description</b>", sBody)]]
+            for row in estimate_data["inspirations"]:
+                rows.append([
+                    Paragraph(f"<b><font color='#a8e6a8'>{row.get('name','')}</font></b>", sBody),
+                    Paragraph(row.get("description",""), sBody),
+                ])
+            story.append(tbl_style(rows, [1.6*inch, W-1.6*inch]))
+        section("5. Top 3 Design Inspirations", insp_content)
+
+    # 6. Savings Tips
+    if "savings_tips" in estimate_data:
+        def tips_content():
+            for i, tip in enumerate(estimate_data["savings_tips"], 1):
+                story.append(Paragraph(f"<b><font color='#7ecf7e'>{i}.</font></b> {tip}", sBody))
+        section("6. Money-Saving Tips", tips_content)
+
+    # 7. Next Steps
+    if "next_steps" in estimate_data:
+        def steps_content():
+            for i, step in enumerate(estimate_data["next_steps"], 1):
+                story.append(Paragraph(f"<b><font color='#7ecf7e'>{i}.</font></b> {step}", sBody))
+        section("7. Recommended Next Steps", steps_content)
+
+    # ── FOOTER ───────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 16))
+    story.append(HRFlowable(width=W, thickness=0.5, color=GREEN_MID, spaceAfter=6))
+    story.append(Paragraph(
+        "🌿 LandscapeAI Estimator · Powered by AI · Southern California 2024–2025 pricing · "
+        "This is not a binding quote. Always obtain 3 contractor bids before committing.",
+        sSmall
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
 def get_estimate(form_data, image_b64_list):
     api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
     client = Anthropic(api_key=api_key)
@@ -1136,6 +1372,31 @@ if generate:
             Final quotes may vary &nbsp;·&nbsp; Always get 3 contractor bids before committing
         </div>
         """, unsafe_allow_html=True)
+
+        # ── PDF Download ─────────────────────────────────────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align:center;font-family:'Playfair Display',serif;
+             font-size:1.1rem;color:#7ecf7e;margin-bottom:0.5rem;">
+            📄 Download Your Full Estimate
+        </div>
+        <div style="text-align:center;color:#a3c9a8;font-size:0.83rem;margin-bottom:1rem;">
+            A beautifully formatted PDF with design previews, cost breakdown, and full project plan.
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.spinner("📄 Building your PDF report..."):
+            pdf_buf = generate_pdf(form_data, result, img_data, sqft)
+
+        dl1, dl2, dl3 = st.columns([1, 2, 1])
+        with dl2:
+            st.download_button(
+                label="⬇️  Download Full Estimate (PDF)",
+                data=pdf_buf,
+                file_name=f"LandscapeAI_Estimate_{form_data['style'].replace('/','-').replace(' ','_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
 # ── FOOTER ────────────────────────────────────────────────────────────────────
 st.markdown("""
