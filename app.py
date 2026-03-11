@@ -317,11 +317,95 @@ def clean_result_text(result_text):
     return "\n".join(l for l in lines if not l.startswith("IMAGE_SEARCHES:"))
 
 
+def generate_yard_images_stability(form_data):
+    """
+    Call Stability AI SDXL to generate photorealistic yard images.
+    Returns list of (PIL.Image, label) or None on failure.
+    """
+    import requests as req
+
+    api_key = st.secrets.get("STABILITY_API_KEY") or os.getenv("STABILITY_API_KEY")
+    if not api_key:
+        return None
+
+    has_pool   = form_data["pool"] == "Yes"
+    has_patio  = form_data["patio_cover"] == "Yes"
+    has_lights = form_data["lighting"] == "Yes"
+    maintenance = form_data["plant_maintenance"].split("(")[0].strip().lower()
+    style   = form_data["style"]
+    ground  = form_data["ground_cover"]
+    colors  = form_data["color_scheme"].split("(")[0].strip()
+
+    pool_txt   = "with a sparkling swimming pool," if has_pool else ""
+    patio_txt  = "with a wooden pergola patio cover and outdoor seating," if has_patio else ""
+    lights_txt = "with warm string lights and landscape lighting," if has_lights else ""
+
+    base = (
+        f"Professional real estate photography of a beautiful {style} style "
+        f"Southern California residential backyard, {ground} ground cover, "
+        f"{colors} color palette, {pool_txt} {patio_txt} {lights_txt}"
+        f"Bird of Paradise plants, Agave, Mexican Sage, Kangaroo Paw, "
+        f"{maintenance} drought-tolerant SoCal plants, "
+        f"sunny California afternoon light, photorealistic DSLR photo, "
+        f"8k resolution, sharp focus, no people, professional landscaping"
+    )
+
+    negative = (
+        "cartoon, illustration, painting, drawing, anime, CGI, 3d render, "
+        "people, humans, ugly, blurry, low quality, watermark, text, fake"
+    )
+
+    views = [
+        (base + ", wide overhead establishing shot showing full yard layout", "Wide Overview"),
+        (base + ", eye-level ground perspective standing in the yard, golden hour warm lighting", "Eye-Level View"),
+        (base + ", close-up detail of plants textures and hardscape materials", "Garden Detail"),
+    ]
+
+    results = []
+    url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    for prompt_text, label in views:
+        try:
+            body = {
+                "text_prompts": [
+                    {"text": prompt_text, "weight": 1.0},
+                    {"text": negative,    "weight": -1.0},
+                ],
+                "cfg_scale": 8,
+                "height": 512,
+                "width": 896,
+                "samples": 1,
+                "steps": 30,
+            }
+            resp = req.post(url, headers=headers, json=body, timeout=90)
+            if resp.status_code == 200:
+                img_b64 = resp.json()["artifacts"][0]["base64"]
+                img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
+                results.append((img, label))
+            else:
+                results.append((None, label))
+        except Exception:
+            results.append((None, label))
+
+    return results
+
+
 def generate_yard_images(form_data):
     """
-    Generate yard preview images using PIL ImageDraw — no external calls, no SVG escaping issues.
+    Try Stability AI first; fall back to PIL illustrations if unavailable.
     Returns list of (PIL.Image, label) tuples for use with st.image().
     """
+    # ── Try Stability AI ────────────────────────────────────────────────────
+    stability_results = generate_yard_images_stability(form_data)
+    if stability_results and any(img is not None for img, _ in stability_results):
+        return stability_results
+
+    # ── PIL fallback ─────────────────────────────────────────────────────────
     from PIL import ImageDraw, ImageFont
 
     color_map = {
@@ -1014,18 +1098,28 @@ if generate:
         # ── AI-Generated Design Visuals ──
         st.markdown("""
         <div style="font-family:'Playfair Display',serif;font-size:1.25rem;color:#7ecf7e;margin-bottom:0.4rem;">
-            🖼️ AI-Generated Design Visuals
+            📸 Photorealistic Design Previews
         </div>
         <div style="color:#a3c9a8;font-size:0.84rem;margin-bottom:1rem;">
-            Three views of your yard based on your exact inputs — style, ground cover, features &amp; color scheme.
+            AI-generated photorealistic renders of your yard — based on your style, ground cover, features &amp; color scheme.
         </div>
         """, unsafe_allow_html=True)
 
-        img_data = generate_yard_images(form_data)
+        with st.spinner("📸 Generating photorealistic yard previews... (this takes ~20 seconds)"):
+            img_data = generate_yard_images(form_data)
+
         ic1, ic2, ic3 = st.columns(3)
         for col, (pil_img, label) in zip([ic1, ic2, ic3], img_data):
             with col:
-                st.image(pil_img, use_container_width=True, caption=label)
+                if pil_img is not None:
+                    st.image(pil_img, use_container_width=True, caption=label)
+                else:
+                    st.markdown(f"""
+                    <div style="background:#1a3320;border:1px solid rgba(100,200,100,0.2);
+                         border-radius:10px;height:200px;display:flex;align-items:center;
+                         justify-content:center;color:#4a7a4a;font-size:0.85rem;text-align:center;padding:1rem;">
+                        ⚠️ Preview unavailable<br><small>Check your Stability API key in Streamlit secrets</small>
+                    </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
