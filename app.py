@@ -169,7 +169,7 @@ def encode_image(uploaded_file):
 # ── Helper: call Claude ───────────────────────────────────────────────────────
 def get_estimate(form_data: dict, image_b64_list: list) -> str:
     api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-client = Anthropic(api_key=api_key)
+    client = Anthropic(api_key=api_key)
 
     content = []
     for img in image_b64_list:
@@ -215,13 +215,13 @@ Based on Southern California average contractor prices and labor costs (2024-202
 
 4. **PROJECT TIMELINE** — Realistic week-by-week schedule
 
-5. **TOP 3 DESIGN INSPIRATIONS** — Describe 3 specific visual styles with plant names and materials the homeowner can Google/Pinterest search (e.g., "Baja Coastal Modern", "Desert Zen Oasis")
+5. **TOP 3 DESIGN INSPIRATIONS** — Describe 3 specific visual styles with plant names and materials the homeowner can Google/Pinterest search
 
 6. **MONEY-SAVING TIPS** — 3 specific tips to stay within budget
 
 7. **RECOMMENDED NEXT STEPS** — What to do to get started
 
-Use dollar signs, bullet points, and headers. Be specific with SoCal plant names (Bird of Paradise, Mexican Sage, Agave, etc.) and SoCal contractors' typical rates.
+Use dollar signs, bullet points, and headers. Be specific with SoCal plant names (Bird of Paradise, Mexican Sage, Agave, etc.) and SoCal contractors typical rates.
 """
     content.append({"type": "text", "text": prompt})
 
@@ -231,7 +231,6 @@ Use dollar signs, bullet points, and headers. Be specific with SoCal plant names
         messages=[{"role": "user", "content": content}]
     )
     return response.content[0].text
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FORM LAYOUT
